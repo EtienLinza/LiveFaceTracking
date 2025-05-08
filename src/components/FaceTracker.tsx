@@ -1,6 +1,6 @@
-import React, { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import Webcam from 'react-webcam';
-import * as fld from '@tensorflow-models/face-landmarks-detection';
+import { SupportedPackages, load, FaceLandmarksDetector } from '@tensorflow-models/face-landmarks-detection';
 import * as tf from '@tensorflow/tfjs';
 import { supabase } from '../lib/supabase';
 import { Line } from 'react-chartjs-2';
@@ -38,14 +38,14 @@ interface FaceData {
 export function FaceTracker() {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [model, setModel] = useState<fld.FaceLandmarksDetector | null>(null);
+  const [model, setModel] = useState<FaceLandmarksDetector | null>(null);
   const [faceData, setFaceData] = useState<FaceData[]>([]);
   const [isTracking, setIsTracking] = useState(false);
 
   useEffect(() => {
     const loadModel = async () => {
       await tf.ready();
-      const model = await fld.load(fld.SupportedPackages.mediapipeFacemesh);
+      const model = await load(SupportedPackages.mediapipeFacemesh);
       setModel(model);
     };
     loadModel();
