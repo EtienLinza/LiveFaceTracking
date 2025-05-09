@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
 import Webcam from 'react-webcam';
-import { SupportedPackages, load, FaceLandmarksDetector } from '@tensorflow-models/face-landmarks-detection';
+import { SupportedModels, loadFaceLandmarksDetection, FaceLandmarksDetector } from '@tensorflow-models/face-landmarks-detection';
 import * as tf from '@tensorflow/tfjs';
 import { supabase } from '../lib/supabase';
 import { Line } from 'react-chartjs-2';
@@ -45,7 +45,7 @@ export function FaceTracker() {
   useEffect(() => {
     const loadModel = async () => {
       await tf.ready();
-      const model = await load(SupportedPackages.mediapipeFacemesh);
+      const model = await loadFaceLandmarksDetection(SupportedModels.MediaPipeFaceMesh);
       setModel(model);
     };
     loadModel();
@@ -73,7 +73,7 @@ export function FaceTracker() {
 
         if (faces.length > 0) {
           const face = faces[0];
-          const landmarks = face.scaledMesh;
+          const landmarks = face.keypoints;
 
           // Get key points
           const nose = landmarks[1];
