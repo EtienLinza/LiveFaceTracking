@@ -46,7 +46,7 @@ export function FaceTracker() {
   useEffect(() => {
     const loadModel = async () => {
       await tf.ready();
-      const model = await faceLandmarksDetection.load(SupportedModels.MediaPipeFaceMesh);
+      const model = await faceLandmarksDetection.loadFaceLandmarksDetection(SupportedModels.MediaPipeFaceMesh);
       setModel(model);
     };
     loadModel();
@@ -83,12 +83,12 @@ export function FaceTracker() {
 
           const newFaceData: FaceData = {
             timestamp: Date.now(),
-            nose_x: (nose as [number, number])[0],
-            nose_y: (nose as [number, number])[1],
-            left_eye_x: (leftEye as [number, number])[0],
-            left_eye_y: (leftEye as [number, number])[1],
-            right_eye_x: (rightEye as [number, number])[0],
-            right_eye_y: (rightEye as [number, number])[1]
+            nose_x: (nose as any)[0],
+            nose_y: (nose as any)[1],
+            left_eye_x: (leftEye as any)[0],
+            left_eye_y: (leftEye as any)[1],
+            right_eye_x: (rightEye as any)[0],
+            right_eye_y: (rightEye as any)[1]
           };
 
           // Store face data
