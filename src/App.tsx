@@ -1,0 +1,45 @@
+import './index.css';
+import { FaceTracker } from './components/FaceTracker';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { FaceData } from './types';
+import { useState, useEffect } from 'react';
+
+function App() {
+  const [lastUpdate, setLastUpdate] = useState<FaceData | null>(null);
+
+  const handleDataUpdate = (data: FaceData) => {
+    setLastUpdate(data);
+  };
+
+  return (
+    <ErrorBoundary>
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+        <header className="bg-gray-800 border-b border-gray-700 py-6 shadow-lg">
+          <div className="max-w-6xl mx-auto px-4">
+            <h1 className="text-4xl font-bold text-white mb-2">
+              🎯 Live Face Tracking System
+            </h1>
+            <p className="text-gray-400">
+              Real-time facial landmark detection with 3D head pose estimation
+            </p>
+          </div>
+        </header>
+
+        <main className="py-8">
+          <FaceTracker
+            onDataUpdate={handleDataUpdate}
+            maxHistorySize={200}
+          />
+        </main>
+
+        <footer className="bg-gray-800 border-t border-gray-700 py-4 mt-8">
+          <div className="max-w-6xl mx-auto px-4 text-center text-gray-400">
+            <p>Live Face Tracking v2.0 | Built with React and TensorFlow</p>
+          </div>
+        </footer>
+      </div>
+    </ErrorBoundary>
+  );
+}
+
+export default App;
