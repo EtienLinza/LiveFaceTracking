@@ -35,8 +35,7 @@ LiveFaceTracking/
 │   │   ├── StatsDisplay.tsx      # Statistics display
 │   │   └── SettingsPanel.tsx     # User settings
 │   ├── hooks/                    # Custom React hooks
-│   ├── lib/                      # Utilities and helpers
-│   │   └── utils.ts              # Math utilities
+│   ├── utils.ts                  # Math utilities
 │   ├── types/                    # TypeScript types
 │   ├── constants.ts              # Application constants
 │   ├── App.tsx                   # Main app component

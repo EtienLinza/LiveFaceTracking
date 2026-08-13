@@ -1,7 +1,6 @@
 // Statistics and visualization panel component
-import React from 'react';
 import { TrackingStats, FaceData } from '../types';
-import { formatTime } from '../lib/utils';
+import { formatTime } from '../utils';
 
 interface StatsDisplayProps {
   stats?: TrackingStats;

@@ -18,10 +18,8 @@ import { FaceData, TrackingStatus, ErrorLog } from '../types';
 import { useFrameMetrics, useFaceDataHistory, useLocalStorage } from '../hooks';
 import { 
   estimateHeadPose, 
-  calculateEyeAspectRatio, 
-  calculateMouthAspectRatio,
   formatTime 
-} from '../lib/utils';
+} from '../utils';
 
 ChartJS.register(
   CategoryScale,
@@ -60,14 +58,25 @@ export function FaceTracker({
   const [showLandmarks, setShowLandmarks] = useLocalStorage('showLandmarks', true);
   const [showHeadPose, setShowHeadPose] = useLocalStorage('showHeadPose', true);
 
+  const addError = useCallback((message: string, details?: any) => {
+    const error: ErrorLog = {
+      timestamp: Date.now(),
+      message,
+      severity: 'error',
+      details
+    };
+    setErrors(prev => [...prev, error].slice(-10)); // Keep last 10 errors
+  }, []);
+
   // Initialize model on mount
   useEffect(() => {
     const initializeModel = async () => {
       try {
         setStatus(TrackingStatus.Initializing);
         await tf.ready();
-        const loadedModel = await faceLandmarksDetection.loadFaceLandmarksDetection(
-          SupportedModels.MediaPipeFaceMesh
+        const loadedModel = await faceLandmarksDetection.createDetector(
+          SupportedModels.MediaPipeFaceMesh,
+          { runtime: 'tfjs', refineLandmarks: true }
         );
         setModel(loadedModel);
         setStatus(TrackingStatus.Idle);
@@ -85,17 +94,7 @@ export function FaceTracker({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, []);
-
-  const addError = useCallback((message: string, details?: any) => {
-    const error: ErrorLog = {
-      timestamp: Date.now(),
-      message,
-      severity: 'error',
-      details
-    };
-    setErrors(prev => [...prev, error].slice(-10)); // Keep last 10 errors
-  }, []);
+  }, [addError]);
 
   const drawLandmarks = useCallback((
     ctx: CanvasRenderingContext2D,
@@ -219,7 +218,7 @@ export function FaceTracker({
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       // Detect faces
-      const faces = await model.estimateFaces(video, false);
+      const faces = await model.estimateFaces(video);
 
       if (faces.length > 0) {
         const face = faces[0];
@@ -268,7 +267,7 @@ export function FaceTracker({
       addError('Detection error', error);
       animationFrameRef.current = requestAnimationFrame(detect);
     }
-  }, [status, model, showLandmarks, showHeadPose, metrics, drawLandmarks, processFaceData, addData, onDataUpdate, recordSession, enableDataPersistence, addError]);
+  }, [status, model, showLandmarks, showHeadPose, metrics, drawLandmarks, processFaceData, addData, onDataUpdate, addError]);
 
   const startTracking = useCallback(() => {
     if (!model) {
@@ -315,7 +314,6 @@ export function FaceTracker({
     }
   }, [history, startTime, getStats, addError]);
 
-  const stats = getStats();
   const sessionDuration = startTime ? Date.now() - startTime : 0;
 
   // Prepare chart data
@@ -490,84 +488,6 @@ export function FaceTracker({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-          // Draw face landmarks
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = '#FF0000';
-          landmarks.forEach(point => {
-            const [x, y] = point as [number, number];
-            ctx.beginPath();
-            ctx.arc(x, y, 1, 0, 3 * Math.PI);
-            ctx.fill();
-          });
-        }
-      }
-    }
-
-    if (isTracking) {
-      requestAnimationFrame(detect);
-    }
-  };
-
-  const chartData = {
-    labels: faceData.map((_, i) => i.toString()),
-    datasets: [
-      {
-        label: 'Nose X Position',
-        data: faceData.map(d => d.nose_x),
-        borderColor: 'rgb(255, 99, 132)',
-        tension: 0.1
-      },
-      {
-        label: 'Nose Y Position',
-        data: faceData.map(d => d.nose_y),
-        borderColor: 'rgb(53, 162, 235)',
-        tension: 0.1
-      }
-    ]
-  };
-
-  return (
-    <div className="flex flex-col items-center gap-4 p-4">
-      <div className="relative">
-        <Webcam
-          ref={webcamRef}
-          mirrored
-          className="rounded-lg"
-          width={640}
-          height={480}
-        />
-        <canvas
-          ref={canvasRef}
-          className="absolute top-0 left-0"
-          width={640}
-          height={480}
-        />
-      </div>
-
-      <div className="flex gap-4">
-        <button
-          onClick={startTracking}
-          disabled={!model || isTracking}
-          className="px-4 py-2 bg-blue-500 text-white rounded disabled:bg-gray-400"
-        >
-          Start Tracking
-        </button>
-        <button
-          onClick={stopTracking}
-          disabled={!isTracking}
-          className="px-4 py-2 bg-red-500 text-white rounded disabled:bg-gray-400"
-        >
-          Stop Tracking
-        </button>
-      </div>
-
-      <div className="w-full max-w-3xl bg-white p-4 rounded-lg shadow">
-        <Line data={chartData} />
-      </div>
     </div>
   );
 }

@@ -1,5 +1,4 @@
 // Settings and preferences panel
-import React, { useState } from 'react';
 import { useLocalStorage } from '../hooks';
 
 interface SettingsPanelProps {
