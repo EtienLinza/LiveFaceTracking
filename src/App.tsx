@@ -2,7 +2,7 @@ import './index.css';
 import { FaceTracker } from './components/FaceTracker';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FaceData } from './types';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 function App() {
   const [lastUpdate, setLastUpdate] = useState<FaceData | null>(null);
@@ -22,6 +22,11 @@ function App() {
             <p className="text-gray-400">
               Real-time facial landmark detection with 3D head pose estimation
             </p>
+            {lastUpdate && (
+              <p className="text-sm text-green-400 mt-2">
+                Latest confidence: {(lastUpdate.confidence * 100).toFixed(1)}%
+              </p>
+            )}
           </div>
         </header>
 
