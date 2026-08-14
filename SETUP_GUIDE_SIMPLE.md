@@ -1,67 +1,229 @@
-# Live Face Tracking - Quick Setup Guide
+# Live Face Tracking - Complete Setup Guide
 
-## Prerequisites
+This project has two ways to run face tracking:
 
-- **Node.js 16+** - Download from https://nodejs.org/
-- **Webcam** - Built-in or external
-- **Modern browser** - Chrome, Firefox, Safari, or Edge
+1. **Recommended web app** - runs in your browser at `http://localhost:5173` using React, Vite, TensorFlow.js, and your webcam.
+2. **Optional Python desktop script** - opens an OpenCV window and uses the `face-alignment` Python package.
 
-## Installation (3 Steps)
+Most users should run the **web app** first. The Python script is separate and is not required for the browser app.
 
-### Step 1: Install Dependencies
-```bash
-cd c:\Users\Work\Desktop\LiveFaceTracking
+---
+
+## 1. Requirements
+
+### Web app requirements
+
+- Node.js 18 or newer. Node 20 LTS is a good choice.
+- npm. It is installed with Node.js.
+- A webcam.
+- A modern browser such as Chrome, Edge, Firefox, or Safari.
+
+### Optional Python script requirements
+
+- Python **3.10 or 3.11** is recommended.
+- Do **not** use Python 3.13 for the current pinned Python requirements. Several pinned scientific/ML packages do not provide compatible wheels there, so pip may try to build packages from source and fail.
+- A webcam.
+
+---
+
+## 2. Web App Setup on Windows
+
+Open PowerShell, then run:
+
+```powershell
+cd C:\Users\Work\Desktop\LiveFaceTracking
 npm install
-```
-
-### Step 2: Run Application
-```bash
 npm run dev
 ```
 
-### Step 3: Open Browser
-Visit: **http://localhost:5173**
+When Vite prints a local URL, open it in your browser:
 
-That's it! 🎉
+```text
+http://localhost:5173/
+```
 
-## Using the App
+Keep the PowerShell window open while using the app. Closing it or pressing `q` in the Vite terminal stops the local development server.
 
-1. **Allow Webcam Access** - Click "Allow" when prompted
-2. **Click "Start Tracking"** - Begin real-time face detection
-3. **View Stats** - See FPS, latency, and performance metrics
-4. **Download Data** - Export tracking data to JSON
-5. **Click "Stop Tracking"** - End the session
+---
 
-## Settings
+## 3. Web App Setup on macOS/Linux
 
-- **Show Landmarks** - Display facial points
-- **Show Head Pose** - Show rotation angles (yaw, pitch, roll)
-- **Theme** - Dark/Light/Auto modes
-
-## Troubleshooting
-
-**App doesn't load?**
-- Make sure you're at http://localhost:5173 (not 5174, 5175, etc.)
-- Check that `npm run dev` is still running in your terminal
-
-**Webcam not working?**
-- Check browser permissions (camera access)
-- Try a different browser
-- Make sure no other app is using the webcam
-
-**Low FPS?**
-- Close other applications
-- Try refreshing the page (F5)
-- Use a simpler background
-
-## Python Script (Optional)
-
-If you want the standalone Python version:
 ```bash
-pip install -r requirements.txt
-python live_face_tracking.py
+cd /path/to/LiveFaceTracking
+npm install
+npm run dev
+```
+
+Then open:
+
+```text
+http://localhost:5173/
 ```
 
 ---
 
-**That's all you need!** The app runs entirely in your browser with no server or database required.
+## 4. How to Use the Web App
+
+1. Open `http://localhost:5173/` while `npm run dev` is still running.
+2. Allow camera access when the browser asks.
+3. Wait for the status to finish initializing.
+4. Pick a camera from the **Camera** dropdown if you do not want the default. The app automatically prefers cameras with labels like RealSense, Kinect, LiDAR, ToF, TrueDepth, depth, stereo, or 3D when your browser exposes those labels.
+5. Click **Start Tracking**.
+6. Keep your face visible and well lit.
+7. Click **Stop Tracking** when finished.
+8. Click **Export JSON** if you want a JSON export of the captured landmark data.
+
+---
+
+## 5. Camera and Tracking Notes
+
+The browser version uses TensorFlow.js FaceMesh landmarks. It now reads landmark coordinates directly from TensorFlow's video-space keypoints, which keeps overlays aligned with the camera feed.
+
+Depth-camera support is automatic where the browser exposes the camera as a normal video input. The app prefers cameras whose device labels look depth-capable, but web browsers usually do not expose raw depth maps through standard webcam APIs. If raw depth is unavailable, the app still tracks with normal RGB video and uses the model's relative `z` landmark values.
+
+---
+
+## 6. Fixing `http://localhost:5173/` 404
+
+The message:
+
+```text
+This localhost page can’t be found
+No webpage was found for the web address: http://localhost:5173/
+HTTP ERROR 404
+```
+
+usually means the browser reached something on port `5173`, but that server did not have the requested page. In this project, the browser app needs two root files:
+
+- `index.html`
+- `src/main.tsx`
+
+Those files are now included. If you still see a 404:
+
+1. Make sure `npm run dev` is still running.
+2. Make sure you opened the exact URL Vite printed. If port `5173` is busy, Vite may use another port such as `5174`.
+3. Stop and restart Vite:
+
+```powershell
+# In the terminal running Vite, press q then Enter.
+npm run dev
+```
+
+4. Hard refresh the browser with `Ctrl+F5`.
+5. Make sure you ran `npm run dev` from the project folder, not from `C:\WINDOWS\System32`.
+
+---
+
+## 7. Explanation of the npm Output You Posted
+
+### `npm --version` showed `11.17.0`
+
+That confirms npm is installed.
+
+### `npm install` said `up to date`
+
+That means npm found the dependencies already installed in `node_modules`.
+
+### `8 vulnerabilities`
+
+That is npm's audit report for packages in the JavaScript dependency tree. The app can still run, but you should review it with:
+
+```powershell
+npm audit
+```
+
+Use this first if npm says safe fixes are available:
+
+```powershell
+npm audit fix
+```
+
+Avoid `npm audit fix --force` unless you are ready to test breaking dependency upgrades.
+
+### `npm warn allow-scripts`
+
+Your npm configuration is blocking or requiring approval for package install scripts. Two packages were mentioned:
+
+- `core-js`
+- `esbuild`
+
+For this app, `esbuild` is important because Vite uses it. Review and approve pending scripts with:
+
+```powershell
+npm approve-scripts --allow-scripts-pending
+```
+
+If npm asks interactively, approve trusted project dependencies, especially `esbuild`.
+
+### `Failed to resolve dependency: @supabase/supabase-js, present in 'optimizeDeps.include'`
+
+The Vite config listed `@supabase/supabase-js` as a dependency to pre-bundle, but this project does not install or use Supabase in the current browser app. That incorrect entry has been removed from `vite.config.ts`.
+
+---
+
+## 8. Optional Python Script Setup
+
+The browser app does not need Python. Only follow this section if you specifically want to run the OpenCV desktop script.
+
+### Install Python 3.11
+
+On Windows, install Python 3.11 from https://www.python.org/downloads/release/python-3119/ or with winget:
+
+```powershell
+winget install Python.Python.3.11
+```
+
+Then create a virtual environment inside the project:
+
+```powershell
+cd C:\Users\Work\Desktop\LiveFaceTracking
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+python live_face_tracking.py
+```
+
+### Why your Python command failed
+
+You were using Python 3.13 from the Microsoft Store path:
+
+```text
+PythonSoftwareFoundation.Python.3.13...
+```
+
+The pinned `numpy==1.24.3` dependency is not compatible with Python 3.13 wheels, so pip tried to build it and failed with:
+
+```text
+Cannot import 'setuptools.build_meta'
+```
+
+Because `pip install -r requirements.txt` failed before installing `face-alignment`, this later command also failed:
+
+```text
+ModuleNotFoundError: No module named 'face_alignment'
+```
+
+That second error is a result of the failed install, not a separate code problem.
+
+---
+
+## 9. Common Commands
+
+```powershell
+npm install          # Install web dependencies
+npm run dev          # Start local web app
+npm run build        # Verify TypeScript and production build
+npm run preview      # Preview the production build after npm run build
+npm audit            # Review JavaScript dependency audit report
+```
+
+Optional Python:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+python live_face_tracking.py
+```

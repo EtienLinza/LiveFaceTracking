@@ -16,21 +16,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
-    minify: 'terser',
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'vendor': [
-            'react',
-            'react-dom',
-            '@tensorflow/tfjs',
-            '@tensorflow-models/face-landmarks-detection',
-          ],
-          'chart': ['chart.js', 'react-chartjs-2'],
-          'ui': ['react-webcam'],
-        },
-      },
-    },
+    minify: 'esbuild',
+    chunkSizeWarningLimit: 2500,
   },
   optimizeDeps: {
     include: [
@@ -41,7 +28,6 @@ export default defineConfig({
       'chart.js',
       'react-chartjs-2',
       'react-webcam',
-      '@supabase/supabase-js',
     ],
   },
 });
