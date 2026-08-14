@@ -7,10 +7,6 @@ import { useState } from 'react';
 function App() {
   const [lastUpdate, setLastUpdate] = useState<FaceData | null>(null);
 
-  const handleDataUpdate = (data: FaceData) => {
-    setLastUpdate(data);
-  };
-
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
@@ -31,17 +27,8 @@ function App() {
         </header>
 
         <main className="py-8">
-          <FaceTracker
-            onDataUpdate={handleDataUpdate}
-            maxHistorySize={200}
-          />
+          <FaceTracker onDataUpdate={setLastUpdate} maxHistorySize={200} />
         </main>
-
-        <footer className="bg-gray-800 border-t border-gray-700 py-4 mt-8">
-          <div className="max-w-6xl mx-auto px-4 text-center text-gray-400">
-            <p>Live Face Tracking v2.0 | Built with React and TensorFlow</p>
-          </div>
-        </footer>
       </div>
     </ErrorBoundary>
   );
