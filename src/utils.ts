@@ -12,11 +12,10 @@ export function estimateHeadPose(landmarks: number[][]): HeadPose {
     return { yaw: 0, pitch: 0, roll: 0 };
   }
 
-  const usesMediaPipeMesh = landmarks.length > 263;
-  const nose = usesMediaPipeMesh ? landmarks[1] : landmarks[30];
-  const chin = usesMediaPipeMesh ? landmarks[152] : landmarks[8];
-  const leftEye = usesMediaPipeMesh ? landmarks[33] : landmarks[36];
-  const rightEye = usesMediaPipeMesh ? landmarks[263] : landmarks[45];
+  const nose = landmarks[30] ?? landmarks[1];
+  const chin = landmarks[8];
+  const leftEye = landmarks[36];
+  const rightEye = landmarks[45];
 
   const eyeDx = rightEye[0] - leftEye[0];
   const eyeDy = rightEye[1] - leftEye[1];

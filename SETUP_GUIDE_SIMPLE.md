@@ -67,23 +67,14 @@ http://localhost:5173/
 1. Open `http://localhost:5173/` while `npm run dev` is still running.
 2. Allow camera access when the browser asks.
 3. Wait for the status to finish initializing.
-4. Pick a camera from the **Camera** dropdown if you do not want the default. The app automatically prefers cameras with labels like RealSense, Kinect, LiDAR, ToF, TrueDepth, depth, stereo, or 3D when your browser exposes those labels.
-5. Click **Start Tracking**.
-6. Keep your face visible and well lit.
-7. Click **Stop Tracking** when finished.
-8. Click **Export JSON** if you want a JSON export of the captured landmark data.
+4. Click **Start Tracking**.
+5. Keep your face visible and well lit.
+6. Click **Stop Tracking** when finished.
+7. Click **Download Data** if you want a JSON export of the captured landmark data.
 
 ---
 
-## 5. Camera and Tracking Notes
-
-The browser version uses TensorFlow.js FaceMesh landmarks. It now reads landmark coordinates directly from TensorFlow's video-space keypoints, which keeps overlays aligned with the camera feed.
-
-Depth-camera support is automatic where the browser exposes the camera as a normal video input. The app prefers cameras whose device labels look depth-capable, but web browsers usually do not expose raw depth maps through standard webcam APIs. If raw depth is unavailable, the app still tracks with normal RGB video and uses the model's relative `z` landmark values.
-
----
-
-## 6. Fixing `http://localhost:5173/` 404
+## 5. Fixing `http://localhost:5173/` 404
 
 The message:
 
@@ -114,7 +105,7 @@ npm run dev
 
 ---
 
-## 7. Explanation of the npm Output You Posted
+## 6. Explanation of the npm Output You Posted
 
 ### `npm --version` showed `11.17.0`
 
@@ -161,7 +152,7 @@ The Vite config listed `@supabase/supabase-js` as a dependency to pre-bundle, bu
 
 ---
 
-## 8. Optional Python Script Setup
+## 7. Optional Python Script Setup
 
 The browser app does not need Python. Only follow this section if you specifically want to run the OpenCV desktop script.
 
@@ -208,7 +199,7 @@ That second error is a result of the failed install, not a separate code problem
 
 ---
 
-## 9. Common Commands
+## 8. Common Commands
 
 ```powershell
 npm install          # Install web dependencies

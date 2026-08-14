@@ -15,9 +15,20 @@ import {
 } from 'chart.js';
 import { FaceData, TrackingStatus, ErrorLog } from '../types';
 import { useFrameMetrics, useFaceDataHistory, useLocalStorage } from '../hooks';
-import { estimateHeadPose, formatTime } from '../utils';
+import { 
+  estimateHeadPose, 
+  formatTime 
+} from '../utils';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 interface FaceTrackerProps {
   onDataUpdate?: (data: FaceData) => void;
@@ -69,35 +80,17 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
   const [showLandmarks, setShowLandmarks] = useLocalStorage('showLandmarks', true);
   const [showHeadPose, setShowHeadPose] = useLocalStorage('showHeadPose', true);
 
-  const addError = useCallback((message: string, details?: unknown) => {
-    setErrors(prev => [
-      ...prev,
-      {
-        timestamp: Date.now(),
-        message,
-        severity: 'error' as const,
-        details,
-      },
-    ].slice(-5));
+  const addError = useCallback((message: string, details?: any) => {
+    const error: ErrorLog = {
+      timestamp: Date.now(),
+      message,
+      severity: 'error',
+      details
+    };
+    setErrors(prev => [...prev, error].slice(-10)); // Keep last 10 errors
   }, []);
 
-  const refreshCameras = useCallback(async () => {
-    if (!navigator.mediaDevices?.enumerateDevices) return;
-
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const videoInputs = devices
-      .filter(device => device.kind === 'videoinput')
-      .map(device => ({ ...device, isDepthCamera: isDepthCamera(device) }));
-
-    setCameras(videoInputs);
-
-    const preferredCamera = videoInputs.find(device => device.isDepthCamera) ?? videoInputs[0];
-    if (preferredCamera && !selectedCameraId) {
-      setSelectedCameraId(preferredCamera.deviceId);
-      setUsingDepthCamera(Boolean(preferredCamera.isDepthCamera));
-    }
-  }, [selectedCameraId]);
-
+  // Initialize model on mount
   useEffect(() => {
     const initializeModel = async () => {
       try {
@@ -106,7 +99,7 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
         await tf.ready();
         const loadedModel = await faceLandmarksDetection.createDetector(
           SupportedModels.MediaPipeFaceMesh,
-          { runtime: 'tfjs', refineLandmarks: true, maxFaces: 1 }
+          { runtime: 'tfjs', refineLandmarks: true }
         );
         setModel(loadedModel);
         setStatus(TrackingStatus.Idle);
@@ -124,25 +117,7 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
       isDetectingRef.current = false;
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [addError, refreshCameras]);
-
-  useEffect(() => () => {
-    model?.dispose();
-  }, [model]);
-
-  useEffect(() => {
-    const selected = cameras.find(camera => camera.deviceId === selectedCameraId);
-    setUsingDepthCamera(Boolean(selected?.isDepthCamera));
-  }, [cameras, selectedCameraId]);
-
-  const videoConstraints = useMemo<MediaTrackConstraints>(() => ({
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
-    frameRate: { ideal: 30, max: 60 },
-    ...(selectedCameraId
-      ? { deviceId: { exact: selectedCameraId } }
-      : { facingMode: 'user' }),
-  }), [selectedCameraId]);
+  }, [addError]);
 
   const drawLandmarks = useCallback((
     ctx: CanvasRenderingContext2D,
@@ -214,8 +189,11 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     canvas.height = video.videoHeight;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    try {
-      const faces = await model.estimateFaces(video, { flipHorizontal: false });
+      // Draw video frame
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Detect faces
+      const faces = await model.estimateFaces(video);
 
       if (faces.length > 0) {
         const face = faces[0];
@@ -260,7 +238,7 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
         animationFrameRef.current = requestAnimationFrame(detect);
       }
     }
-  }, [model, showLandmarks, showHeadPose, drawLandmarks, processFaceData, addData, onDataUpdate, addError, recordFrame]);
+  }, [status, model, showLandmarks, showHeadPose, metrics, drawLandmarks, processFaceData, addData, onDataUpdate, addError]);
 
   const startTracking = useCallback(() => {
     if (!model) {
@@ -310,7 +288,6 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     }
   }, [history, startTime, getStats, usingDepthCamera, addError]);
 
-  const latest = history[0];
   const sessionDuration = startTime ? Date.now() - startTime : 0;
   const isReady = status !== TrackingStatus.Initializing && Boolean(model);
 
@@ -493,14 +470,5 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
         </div>
       )}
     </section>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
-    </div>
   );
 }

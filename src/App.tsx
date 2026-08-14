@@ -9,22 +9,19 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-slate-50 text-slate-950">
-        <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 md:flex-row md:items-end md:justify-between">
-            <div>
-              <p className="text-sm font-medium uppercase tracking-[0.24em] text-teal-600">LiveFaceTracking</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
-                Minimal real-time face tracking
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-                Browser-based facial landmarks, head pose, and capture stats with automatic preference for depth-capable cameras when available.
-              </p>
-            </div>
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+        <header className="bg-gray-800 border-b border-gray-700 py-6 shadow-lg">
+          <div className="max-w-6xl mx-auto px-4">
+            <h1 className="text-4xl font-bold text-white mb-2">
+              🎯 Live Face Tracking System
+            </h1>
+            <p className="text-gray-400">
+              Real-time facial landmark detection with 3D head pose estimation
+            </p>
             {lastUpdate && (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                Latest confidence <span className="font-semibold text-slate-950">{(lastUpdate.confidence * 100).toFixed(1)}%</span>
-              </div>
+              <p className="text-sm text-green-400 mt-2">
+                Latest confidence: {(lastUpdate.confidence * 100).toFixed(1)}%
+              </p>
             )}
           </div>
         </header>
