@@ -10,6 +10,7 @@ import {
   LinearScale,
   PointElement,
   LineElement,
+  Title,
   Tooltip,
   Legend
 } from 'chart.js';
@@ -61,6 +62,18 @@ const isDepthCamera = (device: MediaDeviceInfo) => {
   return DEPTH_CAMERA_KEYWORDS.some(keyword => label.includes(keyword));
 };
 
+const DEFAULT_VIDEO_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 1280 },
+  height: { ideal: 720 },
+};
+
+const Metric = ({ label, value }: { label: string; value: string }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
+    <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
+  </div>
+);
+
 export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerProps) {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,6 +103,37 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     setErrors(prev => [...prev, error].slice(-10)); // Keep last 10 errors
   }, []);
 
+  // List available cameras and prefer a depth-capable one when the browser
+  // exposes a recognisable label (labels are only available after permission).
+  const refreshCameras = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoInputs: CameraInfo[] = devices
+      .filter(device => device.kind === 'videoinput')
+      .map(device => ({ ...device, isDepthCamera: isDepthCamera(device) }));
+
+    setCameras(videoInputs);
+
+    const preferred = videoInputs.find(camera => camera.isDepthCamera) ?? videoInputs[0];
+    if (!preferred) return;
+
+    setSelectedCameraId(previous =>
+      previous && videoInputs.some(camera => camera.deviceId === previous)
+        ? previous
+        : preferred.deviceId,
+    );
+    setUsingDepthCamera(Boolean(preferred.isDepthCamera));
+  }, []);
+
+  const videoConstraints = useMemo<MediaTrackConstraints>(
+    () => ({
+      ...DEFAULT_VIDEO_CONSTRAINTS,
+      ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : {}),
+    }),
+    [selectedCameraId],
+  );
+
   // Initialize model on mount
   useEffect(() => {
     const initializeModel = async () => {
@@ -117,7 +161,7 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
       isDetectingRef.current = false;
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [addError]);
+  }, [addError, refreshCameras]);
 
   const drawLandmarks = useCallback((
     ctx: CanvasRenderingContext2D,
@@ -185,9 +229,10 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
       return;
     }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    try {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // Draw video frame
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -290,6 +335,7 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
 
   const sessionDuration = startTime ? Date.now() - startTime : 0;
   const isReady = status !== TrackingStatus.Initializing && Boolean(model);
+  const latest = history[0] ?? null;
 
   const chartData = {
     labels: history.slice(0, 40).reverse().map((_, i) => i),
