@@ -31,7 +31,7 @@ Most users should run the **web app** first. The Python script is separate and i
 Open PowerShell, then run:
 
 ```powershell
-cd C:\Users\Work\Desktop\LiveFaceTracking
+cd C:\path\to\LiveFaceTracking
 npm install
 npm run dev
 ```
@@ -67,10 +67,11 @@ http://localhost:5173/
 1. Open `http://localhost:5173/` while `npm run dev` is still running.
 2. Allow camera access when the browser asks.
 3. Wait for the status to finish initializing.
-4. Click **Start Tracking**.
+4. Click **Start tracking**.
 5. Keep your face visible and well lit.
-6. Click **Stop Tracking** when finished.
-7. Click **Download Data** if you want a JSON export of the captured landmark data.
+6. Click **Stop** when finished.
+7. Click **Export JSON** if you want a JSON export of the whole session's landmark data.
+8. The **Clear** button empties the session buffer.
 
 ---
 
@@ -154,7 +155,7 @@ The Vite config listed `@supabase/supabase-js` as a dependency to pre-bundle, bu
 
 ## 7. Optional Python Script Setup
 
-The browser app does not need Python. Only follow this section if you specifically want to run the OpenCV desktop script.
+The browser app does not need Python. Only follow this section if you specifically want to run the desktop script.
 
 ### Install Python 3.11
 
@@ -167,7 +168,7 @@ winget install Python.Python.3.11
 Then create a virtual environment inside the project:
 
 ```powershell
-cd C:\Users\Work\Desktop\LiveFaceTracking
+cd C:\path\to\LiveFaceTracking
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip setuptools wheel

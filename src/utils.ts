@@ -19,27 +19,16 @@ export interface HeadPosePoints {
   rightEye: HeadPosePoint;
 }
 
-const toPoint = (point?: number[]): HeadPosePoint => ({
-  x: point?.[0] ?? 0,
-  y: point?.[1] ?? 0,
-});
-
-export function estimateHeadPose(landmarks: number[][]): HeadPose {
-  if (landmarks.length < 68) {
-    return { yaw: 0, pitch: 0, roll: 0 };
-  }
-
-  return estimateHeadPoseFromPoints({
-    nose: toPoint(landmarks[30] ?? landmarks[1]),
-    chin: toPoint(landmarks[8]),
-    leftEye: toPoint(landmarks[36]),
-    rightEye: toPoint(landmarks[45]),
-  });
-}
-
 /**
- * Same estimation as `estimateHeadPose`, but takes only the four landmarks it
- * actually needs so a per-frame caller does not have to copy all 468 points.
+ * Apparent head orientation from four 2D landmarks.
+ *
+ * This is a scaled 2D ratio heuristic, not a solved 3D pose: the z coordinate is
+ * never used and no projection is inverted, so the results are not true angles.
+ * Roll is the real in-plane angle between the eye corners; yaw and pitch are
+ * linear rescalings of horizontal/vertical offsets. A neutral head therefore
+ * does not read zero, which is why callers show the value relative to a baseline
+ * captured at the start of the session. Pass eye *corners* rather than eyelids:
+ * eyelids move when the user blinks.
  */
 export function estimateHeadPoseFromPoints({
   nose,
@@ -62,21 +51,13 @@ export function estimateHeadPoseFromPoints({
   return { yaw, pitch, roll };
 }
 
-export function calculateEyeAspectRatio(eyeLandmarks: number[][]): number {
-  if (eyeLandmarks.length < 6) return 0;
-  const verticalA = distance(eyeLandmarks[1], eyeLandmarks[5]);
-  const verticalB = distance(eyeLandmarks[2], eyeLandmarks[4]);
-  const horizontal = distance(eyeLandmarks[0], eyeLandmarks[3]);
-  return horizontal === 0 ? 0 : (verticalA + verticalB) / (2 * horizontal);
-}
+/** Difference between a pose and the neutral baseline it is compared against. */
+export function offsetHeadPose(pose: HeadPose, baseline: HeadPose | null): HeadPose {
+  if (!baseline) return pose;
 
-export function calculateMouthAspectRatio(mouthLandmarks: number[][]): number {
-  if (mouthLandmarks.length < 4) return 0;
-  const vertical = distance(mouthLandmarks[1], mouthLandmarks[3]);
-  const horizontal = distance(mouthLandmarks[0], mouthLandmarks[2]);
-  return horizontal === 0 ? 0 : vertical / horizontal;
-}
-
-function distance(a: number[], b: number[]): number {
-  return Math.hypot((a[0] ?? 0) - (b[0] ?? 0), (a[1] ?? 0) - (b[1] ?? 0));
+  return {
+    yaw: pose.yaw - baseline.yaw,
+    pitch: pose.pitch - baseline.pitch,
+    roll: pose.roll - baseline.roll,
+  };
 }

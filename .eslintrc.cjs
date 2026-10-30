@@ -21,6 +21,7 @@ module.exports = {
   ignorePatterns: ['dist', 'node_modules'],
   rules: {
     'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-    '@typescript-eslint/no-explicit-any': 'off',
+    // Warn rather than off: `any` is what hid the fabricated confidence score.
+    '@typescript-eslint/no-explicit-any': 'warn',
   },
 };

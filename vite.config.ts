@@ -1,4 +1,5 @@
-import { defineConfig } from 'vite';
+/// <reference types="vitest" />
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
@@ -22,7 +23,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
   server: {
@@ -32,8 +33,8 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
-    minify: 'esbuild',
+    // Sourcemaps used to add ~17 MB to the build for no deployment benefit.
+    sourcemap: false,
     chunkSizeWarningLimit: 2500,
   },
   optimizeDeps: {
@@ -46,5 +47,10 @@ export default defineConfig({
       'react-chartjs-2',
       'react-webcam',
     ],
+  },
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.ts'],
+    restoreMocks: true,
   },
 });

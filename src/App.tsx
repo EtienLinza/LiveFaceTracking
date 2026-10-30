@@ -16,11 +16,12 @@ function App() {
               🎯 Live Face Tracking System
             </h1>
             <p className="mt-1 text-xs text-gray-400 sm:text-sm md:text-base">
-              Real-time facial landmark detection with 3D head pose estimation
+              Real-time facial landmark detection with an approximate head orientation indicator
             </p>
             {lastUpdate && (
               <p className="mt-1.5 text-xs text-green-400 sm:text-sm">
-                Latest confidence: {(lastUpdate.confidence * 100).toFixed(1)}%
+                Nose at {Math.round(lastUpdate.nose_x)}, {Math.round(lastUpdate.nose_y)} · updated{' '}
+                {new Date(lastUpdate.timestamp).toLocaleTimeString()}
               </p>
             )}
           </div>
