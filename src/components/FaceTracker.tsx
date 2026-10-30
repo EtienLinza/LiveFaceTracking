@@ -13,6 +13,12 @@ import {
   formatTime,
   HeadPosePoints,
 } from '../utils';
+import {
+  LandmarkSmoother,
+  OneEuroConfig,
+  PoseSmoother,
+  SmoothedPoint,
+} from '../tracking/smoothing';
 
 // chart.js is only needed once tracking has produced data, so it lives in its
 // own chunk instead of the initial bundle.
@@ -73,6 +79,17 @@ const COMPACT_TARGET_FPS = 20;
 // Minimum gap between React updates driven by incoming frames.
 const DATA_EMIT_INTERVAL_MS = 200;
 
+// The mesh misses the odd frame (a blink, motion blur, the head turning away).
+// Hold the last overlay on screen for this long before reporting a lost face.
+const FACE_LOSS_HOLD_MS = 300;
+
+// Display smoothing. The cutoff rises with measured speed, so a resting head is
+// held steady while a real turn still follows quickly. `beta` is cutoff-Hz per
+// unit of speed: degrees per second for the pose angles, pixels per second for
+// the landmark points.
+const POSE_SMOOTHING: OneEuroConfig = { minCutoff: 1.5, beta: 0.05 };
+const LANDMARK_SMOOTHING: OneEuroConfig = { minCutoff: 3, beta: 0.015 };
+
 /** Small translucent label box drawn on top of the camera feed. */
 const drawOverlay = (
   ctx: CanvasRenderingContext2D,
@@ -94,6 +111,15 @@ const drawOverlay = (
     ctx.fillText(line, top + 12 * scale, top + 24 * scale + index * lineHeight);
   });
 };
+
+// Whole degrees: the indicator is a 2D heuristic, so tenths would only show the
+// noise. It stays relative to the start-of-session baseline.
+const poseOverlayLines = (pose: HeadPose): string[] => [
+  'Head pose (vs start)',
+  `Yaw ${Math.round(pose.yaw)}°`,
+  `Pitch ${Math.round(pose.pitch)}°`,
+  `Roll ${Math.round(pose.roll)}°`,
+];
 
 const Metric = ({ label, value }: { label: string; value: string }) => (
   <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
@@ -121,6 +147,13 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
   const baselinePoseRef = useRef<HeadPose | null>(null);
   const lastFrameAtRef = useRef(0);
   const lastEmitRef = useRef(0);
+  // Display-only smoothing state. Created lazily on the first tracked frame and
+  // reset whenever tracking starts or a face is really lost.
+  const poseSmootherRef = useRef<PoseSmoother>();
+  const landmarkSmootherRef = useRef<LandmarkSmoother>();
+  const lastFaceAtRef = useRef<number | null>(null);
+  const lastLandmarksRef = useRef<readonly SmoothedPoint[] | null>(null);
+  const lastPoseRef = useRef<HeadPose | null>(null);
 
   const constrained = useMemo(isConstrainedDevice, []);
   const targetFps = constrained ? COMPACT_TARGET_FPS : DESKTOP_TARGET_FPS;
@@ -188,6 +221,9 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
   const videoConstraints = useMemo<MediaTrackConstraints>(
     () => ({
       ...(constrained ? COMPACT_VIDEO_CONSTRAINTS : DESKTOP_VIDEO_CONSTRAINTS),
+      // The user faces the screen, so prefer the front camera. `ideal` keeps a
+      // chosen or external camera working when one is selected below.
+      facingMode: { ideal: 'user' },
       ...(selectedCameraId ? { deviceId: { ideal: selectedCameraId } } : {}),
     }),
     [constrained, selectedCameraId],
@@ -267,18 +303,21 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
 
   const drawLandmarks = useCallback((
     ctx: CanvasRenderingContext2D,
-    landmarks: Keypoint[],
+    landmarks: readonly SmoothedPoint[],
+    opacity = 1,
   ) => {
-    if (!landmarks?.length) return;
+    if (!landmarks.length) return;
 
+    ctx.save();
+    ctx.globalAlpha = opacity;
     ctx.fillStyle = 'rgba(16, 185, 129, 0.95)';
     landmarks.forEach((landmark, index) => {
       if (index % 4 !== 0 && !HIGHLIGHTED_LANDMARKS.has(index)) return;
-      const point = getLandmarkPoint(landmark);
       ctx.beginPath();
-      ctx.arc(point.x, point.y, HIGHLIGHTED_LANDMARKS.has(index) ? 3 : 1.5, 0, 2 * Math.PI);
+      ctx.arc(landmark.x, landmark.y, HIGHLIGHTED_LANDMARKS.has(index) ? 3 : 1.5, 0, 2 * Math.PI);
       ctx.fill();
     });
+    ctx.restore();
   }, []);
 
   const processFaceData = useCallback((face: Face): FaceData | null => {
@@ -351,27 +390,36 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     if (!ctx) return;
 
     try {
-      // The <video> element already paints the camera feed and shares this
-      // canvas' object-cover crop, so the frame no longer has to be copied onto
-      // the canvas on every tick. Only the overlay is drawn here.
+      const faces = await detector.estimateFaces(video);
+      const face = faces[0];
+      // Sampled after inference so the smoothing timestamps match when the
+      // samples arrived rather than when the frame was scheduled.
+      const now = performance.now();
+
+      // Sizing and clearing happen *after* the await on purpose: drawing them
+      // before it let the browser paint a blank canvas while the model worked,
+      // which flashed the whole overlay off on every single frame.
       if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
       }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Detect faces
-      const faces = await detector.estimateFaces(video);
-      const face = faces[0];
-
       let faceData: FaceData | null = null;
       let pose: HeadPose | null = null;
+      let holding = false;
 
       if (face) {
         const keypoints = face.keypoints;
+        lastFaceAtRef.current = now;
 
         if (showLandmarksRef.current) {
-          drawLandmarks(ctx, keypoints);
+          const smoother = (landmarkSmootherRef.current ??= new LandmarkSmoother(
+            LANDMARK_SMOOTHING,
+          ));
+          const landmarks = smoother.smooth(keypoints, now);
+          lastLandmarksRef.current = landmarks;
+          drawLandmarks(ctx, landmarks);
         }
 
         faceData = processFaceData(face);
@@ -383,22 +431,41 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
           // Subtracting the first frame of the session turns it into a relative
           // indicator, which is what the overlay reports.
           baselinePoseRef.current ??= absolute;
-          pose = offsetHeadPose(absolute, baselinePoseRef.current);
+          const smoother = (poseSmootherRef.current ??= new PoseSmoother(POSE_SMOOTHING));
+          pose = smoother.next(offsetHeadPose(absolute, baselinePoseRef.current), now);
+          lastPoseRef.current = pose;
 
-          drawOverlay(ctx, canvas.width, [
-            'Head pose (vs start)',
-            `Yaw ${pose.yaw.toFixed(1)}°`,
-            `Pitch ${pose.pitch.toFixed(1)}°`,
-            `Roll ${pose.roll.toFixed(1)}°`,
-          ]);
+          drawOverlay(ctx, canvas.width, poseOverlayLines(pose));
         }
       } else {
-        drawOverlay(ctx, canvas.width, ['No face detected'], 180);
+        const lastSeenAt = lastFaceAtRef.current;
+        holding = lastSeenAt !== null && now - lastSeenAt <= FACE_LOSS_HOLD_MS;
+
+        if (holding) {
+          // One or two missed frames are normal; keep the last overlay on screen
+          // (dimmed landmarks) instead of flashing "No face detected".
+          if (showLandmarksRef.current && lastLandmarksRef.current) {
+            drawLandmarks(ctx, lastLandmarksRef.current, 0.35);
+          }
+          if (showHeadPoseRef.current && lastPoseRef.current) {
+            drawOverlay(ctx, canvas.width, poseOverlayLines(lastPoseRef.current));
+          }
+        } else {
+          if (lastSeenAt !== null) {
+            // A real loss: drop the smoothed state so a returning face is drawn
+            // where it is instead of gliding in from the old position.
+            landmarkSmootherRef.current?.reset();
+            poseSmootherRef.current?.reset();
+            lastLandmarksRef.current = null;
+            lastPoseRef.current = null;
+            lastFaceAtRef.current = null;
+          }
+          drawOverlay(ctx, canvas.width, ['No face detected'], 180);
+        }
       }
 
       // One throttled UI update per interval: the header readout and the
       // screen-reader status do not need to re-render at the detection rate.
-      const now = performance.now();
       if (now - lastEmitRef.current >= DATA_EMIT_INTERVAL_MS) {
         lastEmitRef.current = now;
         if (faceData) onDataUpdate?.(faceData);
@@ -407,8 +474,10 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
           setAssistiveText(
             `Face detected. Apparent head orientation relative to the start of the session: yaw ${Math.round(pose.yaw)}, pitch ${Math.round(pose.pitch)}, roll ${Math.round(pose.roll)} degrees.`,
           );
-        } else {
-          setAssistiveText(faceData ? 'Face detected.' : 'No face detected.');
+        } else if (faceData) {
+          setAssistiveText('Face detected.');
+        } else if (!holding) {
+          setAssistiveText('No face detected.');
         }
       }
     } catch (error) {
@@ -445,6 +514,13 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     lastFrameAtRef.current = 0;
     lastEmitRef.current = 0;
     baselinePoseRef.current = null;
+    // A new session starts from raw values: no smoothing carry-over, no held
+    // overlay from the previous run.
+    poseSmootherRef.current?.reset();
+    landmarkSmootherRef.current?.reset();
+    lastFaceAtRef.current = null;
+    lastLandmarksRef.current = null;
+    lastPoseRef.current = null;
     loopIdRef.current += 1;
     isDetectingRef.current = true;
     setStatus(TrackingStatus.Tracking);

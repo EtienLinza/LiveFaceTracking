@@ -32,7 +32,7 @@ Requires Node.js 22.12 or newer (Vite 8 and Vitest 5 both need it) and a webcam.
 | `npm run preview` | Serve the production build locally |
 | `npm run type-check` | TypeScript only |
 | `npm run lint` | ESLint over `src` |
-| `npm test` | Vitest run (unit tests for the metric and storage hooks plus the pose math) |
+| `npm test` | Vitest run (unit tests for the metric and storage hooks, the pose math and the smoothing filters) |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run clean` | Delete `dist/` |
 
@@ -58,6 +58,14 @@ offsets with no 3D solve (no PnP, no transformation matrix). A resting head does
 not read zero, so the overlay shows values relative to the first frame of the
 session. Blinks no longer perturb it because the eye *corners* (landmarks 33 and
 263) are used rather than the upper eyelids.
+
+Both the drawn landmarks and the pose readout pass through a one-euro low-pass
+filter before they are drawn: it smooths a resting head heavily but raises its
+cutoff with measured speed, so a real head turn is followed almost immediately.
+The overlay prints whole degrees because tenths would only show the heuristic's
+noise, and it holds the last result (landmarks dimmed) for up to 300 ms when the
+detector misses a frame, instead of flashing "No face detected". Smoothing is
+display-only: the chart and the JSON export keep the raw per-frame readings.
 
 The detector does not report a confidence score, so the app no longer shows one.
 
@@ -98,8 +106,10 @@ session buffer.
 
 The camera picker is filled in after the browser grants permission (browsers
 hide labels and device IDs until then) and refreshes when a camera is plugged in
-or removed. The selected device is requested as a preference (`ideal`), so if it
-disappears the browser falls back to the default camera instead of failing.
+or removed. The front camera is preferred (`facingMode: 'user'`) because that is
+the one pointed at the user on a phone. The selected device is requested as a
+preference (`ideal`), so if it disappears the browser falls back to the default
+camera instead of failing.
 
 ## Known limitations
 
@@ -110,7 +120,10 @@ disappears the browser falls back to the default camera instead of failing.
 - Model weights come from `tfhub.dev` (and `storage.googleapis.com`) at runtime;
   self-hosting them is not implemented.
 - No test covers the live camera loop. The unit tests cover the metric hooks,
-  the pose math and the storage hook; the camera path needs a real device.
+  the pose math, the smoothing filters and the storage hook; the camera path
+  needs a real device.
+- The smoothing keeps the overlay slightly behind very fast movement. It is a
+  filter tuned by eye, not a calibration; exported data is unfiltered.
 - The session buffer that the export writes grows with the session (roughly a
   couple of hundred bytes per frame). For very long sessions use **Export JSON**
   and then **Clear**, which empties it.

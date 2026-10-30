@@ -34,13 +34,14 @@ docker compose -f docker-compose.base44.yml exec -T web npm test
 docker compose -f docker-compose.base44.yml exec -T web npm run build   # tsc --noEmit + vite build
 ```
 
-All four are expected to pass with **no output** from type-check/lint and 17
+All four are expected to pass with **no output** from type-check/lint and 28
 passing tests. `npm audit` reports **0 vulnerabilities**; do not reintroduce the
 old advisories (Vite ≤6.4, esbuild, old typescript-eslint, glob/minimatch).
 
 Tests live next to the code (`src/utils.test.ts`,
-`src/hooks/index.test.ts`) and run in jsdom through Vitest. They cover the metric
-hooks, the history/session split, `useLocalStorage`, and the head-pose math.
+`src/hooks/index.test.ts`, `src/tracking/smoothing.test.ts`) and run in jsdom
+through Vitest. They cover the metric hooks, the history/session split,
+`useLocalStorage`, the head-pose math and the one-euro filters.
 Nothing exercises the live camera loop — no automation in the sandbox can, see
 "No camera in the sandbox" below.
 
@@ -61,6 +62,15 @@ CI (`.github/workflows/ci.yml`) runs install, type-check, lint, test and build.
   pose. The UI shows it relative to a baseline captured on the first frame of the
   session and calls it an indicator. If you change the math, keep the label
   truthful and update the comment plus `src/utils.test.ts`.
+- **Smoothing is display-only.** `src/tracking/smoothing.ts` provides a one-euro
+  filter (cutoff rises with measured speed) used for the drawn landmarks and the
+  pose readout. Rows recorded for the chart, the metrics and the JSON export stay
+  raw — do not filter `FaceData` or the session buffer. The overlay prints whole
+  degrees because tenths only expose the heuristic's noise.
+- A missed detection frame holds the last overlay for `FACE_LOSS_HOLD_MS`
+  (300 ms), landmarks dimmed, before "No face detected" appears. When that hold
+  expires, the smoothers reset so a returning face is drawn at its real position
+  instead of gliding across the frame from a stale smoothed one.
 
 ## Sandbox-specific configuration
 
@@ -115,6 +125,12 @@ CI (`.github/workflows/ci.yml`) runs install, type-check, lint, test and build.
   large screens and 640x480 on coarse-pointer/small screens, and no longer copies the
   video frame onto the canvas (`<video>` and `<canvas>` share the same `object-cover`
   crop; only landmarks/overlay are drawn). Canvas 2D context is cached in a ref.
+- Canvas sizing/`clearRect` happens **after** `estimateFaces`, never before the
+  await: doing it first let the browser paint a blank canvas during inference and
+  flashed the overlay off every frame. The previous frame stays visible until the
+  new one is ready.
+- The `facingMode: { ideal: 'user' }` preference in the video constraints picks the
+  front camera on phones; the device picker still overrides it.
 - Layout: single column below `md`, two columns from `md`; grid/flex children need
   `min-w-0` or the video forces sideways scrolling. Touch targets are at least 44 px
   and form controls use `text-base` on mobile so iOS does not zoom on focus.

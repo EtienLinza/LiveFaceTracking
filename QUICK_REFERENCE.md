@@ -31,13 +31,15 @@ npm run format       # Prettier
 
 - Detect 468 face landmarks from the webcam in the browser (TensorFlow.js +
   MediaPipe FaceMesh).
-- Draw landmarks and a head orientation overlay on the video.
+- Draw landmarks and a head orientation overlay on the video, smoothed for a
+  steady display (the export stays raw).
 - Report FPS, per-frame processing time, frame count and session duration.
 - Export the full session's landmark readings as JSON.
 
 Head orientation is an **approximate indicator** relative to the first frame of
 the session, not a measured 3D pose. The detector does not report a confidence
-score, so none is shown.
+score, so none is shown. A missed frame keeps the last overlay (dimmed) for up
+to 300 ms before the app reports a lost face.
 
 ## Privacy
 
