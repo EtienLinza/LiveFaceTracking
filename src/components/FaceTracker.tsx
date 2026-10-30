@@ -1,9 +1,18 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Webcam from 'react-webcam';
-import type { FaceLandmarksDetector } from '@tensorflow-models/face-landmarks-detection';
-import { FaceData, TrackingStatus, ErrorLog } from '../types';
+import type {
+  Face,
+  FaceLandmarksDetector,
+  Keypoint,
+} from '@tensorflow-models/face-landmarks-detection';
+import { FaceData, HeadPose, TrackingStatus, ErrorLog } from '../types';
 import { useFaceDataHistory, useFrameMetrics, useLocalStorage } from '../hooks';
-import { estimateHeadPoseFromPoints, formatTime } from '../utils';
+import {
+  estimateHeadPoseFromPoints,
+  offsetHeadPose,
+  formatTime,
+  HeadPosePoints,
+} from '../utils';
 
 // chart.js is only needed once tracking has produced data, so it lives in its
 // own chunk instead of the initial bundle.
@@ -14,31 +23,32 @@ interface FaceTrackerProps {
   maxHistorySize?: number;
 }
 
-type CameraInfo = MediaDeviceInfo & { isDepthCamera?: boolean };
+/** MediaPipe FaceMesh indices used by the tracking readout. */
+const LANDMARK = {
+  noseTip: 1,
+  chin: 152,
+  // Eye corners, not the upper eyelids (159/386): eyelids move when the user
+  // blinks, which used to show up as head rotation.
+  rightEyeCorner: 33,
+  leftEyeCorner: 263,
+  mouth: 13,
+} as const;
 
-const DEPTH_CAMERA_KEYWORDS = [
-  'depth',
-  'realsense',
-  'kinect',
-  'true depth',
-  'truedepth',
-  'lidar',
-  'tof',
-  'time-of-flight',
-  'stereo',
-  '3d',
-];
+// Landmarks drawn by the overlay, plus every fourth point.
+const HIGHLIGHTED_LANDMARKS = new Set<number>([1, 8, 13, 33, 263]);
 
-const getLandmarkPoint = (landmark: any) => ({
+const getLandmarkPoint = (landmark?: Keypoint) => ({
   x: Number(landmark?.x ?? 0),
   y: Number(landmark?.y ?? 0),
   z: Number(landmark?.z ?? 0),
 });
 
-const isDepthCamera = (device: MediaDeviceInfo) => {
-  const label = device.label.toLowerCase();
-  return DEPTH_CAMERA_KEYWORDS.some(keyword => label.includes(keyword));
-};
+const readPosePoints = (keypoints: Keypoint[]): HeadPosePoints => ({
+  nose: getLandmarkPoint(keypoints[LANDMARK.noseTip]),
+  chin: getLandmarkPoint(keypoints[LANDMARK.chin]),
+  leftEye: getLandmarkPoint(keypoints[LANDMARK.leftEyeCorner]),
+  rightEye: getLandmarkPoint(keypoints[LANDMARK.rightEyeCorner]),
+});
 
 // Phones and small tablets get a smaller capture and a lower detection rate, so
 // inference stays responsive and the battery/data cost stays reasonable. Larger
@@ -103,6 +113,12 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const animationFrameRef = useRef<number>();
   const isDetectingRef = useRef(false);
+  // Incremented on Start and Stop: an iteration that was already awaiting the
+  // detector can then tell it no longer owns the loop.
+  const loopIdRef = useRef(0);
+  const detectRef = useRef<() => void>(() => {});
+  const modelRef = useRef<FaceLandmarksDetector | null>(null);
+  const baselinePoseRef = useRef<HeadPose | null>(null);
   const lastFrameAtRef = useRef(0);
   const lastEmitRef = useRef(0);
 
@@ -112,17 +128,34 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
   const [model, setModel] = useState<FaceLandmarksDetector | null>(null);
   const [status, setStatus] = useState<TrackingStatus>(TrackingStatus.Idle);
   const [errors, setErrors] = useState<ErrorLog[]>([]);
-  const [startTime, setStartTime] = useState<number | null>(null);
-  const [cameras, setCameras] = useState<CameraInfo[]>([]);
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
-  const [usingDepthCamera, setUsingDepthCamera] = useState(false);
+  const [assistiveText, setAssistiveText] = useState('Camera ready.');
 
-  const { history, addData, getStats, clear: clearHistory } = useFaceDataHistory(maxHistorySize);
+  const {
+    history,
+    addData,
+    getSessionData,
+    getStats,
+    clear: clearHistory,
+  } = useFaceDataHistory(maxHistorySize);
   const { metrics, recordFrame, reset: resetMetrics } = useFrameMetrics();
   const [showLandmarks, setShowLandmarks] = useLocalStorage('showLandmarks', true);
   const [showHeadPose, setShowHeadPose] = useLocalStorage('showHeadPose', true);
 
-  const addError = useCallback((message: string, details?: any) => {
+  // The detection loop outlives the render that started it, so it reads these
+  // options through refs. Reading them from the callback closure is what made
+  // the checkboxes appear dead until Stop and Start.
+  const showLandmarksRef = useRef(showLandmarks);
+  const showHeadPoseRef = useRef(showHeadPose);
+  useEffect(() => {
+    showLandmarksRef.current = showLandmarks;
+  }, [showLandmarks]);
+  useEffect(() => {
+    showHeadPoseRef.current = showHeadPose;
+  }, [showHeadPose]);
+
+  const addError = useCallback((message: string, details?: unknown) => {
     const error: ErrorLog = {
       timestamp: Date.now(),
       message,
@@ -132,33 +165,30 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     setErrors(prev => [...prev, error].slice(-10)); // Keep last 10 errors
   }, []);
 
-  // List available cameras and prefer a depth-capable one when the browser
-  // exposes a recognisable label (labels are only available after permission).
+  // `enumerateDevices` reports empty labels and IDs until the user has granted
+  // camera permission, so this runs again from `onUserMedia` and on every
+  // `devicechange` event (a camera plugged in or removed).
   const refreshCameras = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
 
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const videoInputs: CameraInfo[] = devices
-      .filter(device => device.kind === 'videoinput')
-      .map(device => ({ ...device, isDepthCamera: isDepthCamera(device) }));
+    const videoInputs = devices.filter(device => device.kind === 'videoinput');
 
     setCameras(videoInputs);
-
-    const preferred = videoInputs.find(camera => camera.isDepthCamera) ?? videoInputs[0];
-    if (!preferred) return;
-
     setSelectedCameraId(previous =>
       previous && videoInputs.some(camera => camera.deviceId === previous)
         ? previous
-        : preferred.deviceId,
+        : videoInputs[0]?.deviceId ?? '',
     );
-    setUsingDepthCamera(Boolean(preferred.isDepthCamera));
   }, []);
 
+  // `ideal` rather than `exact`: if the chosen camera disappears the browser
+  // falls back to the default device instead of failing with an
+  // overconstrained error.
   const videoConstraints = useMemo<MediaTrackConstraints>(
     () => ({
       ...(constrained ? COMPACT_VIDEO_CONSTRAINTS : DESKTOP_VIDEO_CONSTRAINTS),
-      ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : {}),
+      ...(selectedCameraId ? { deviceId: { ideal: selectedCameraId } } : {}),
     }),
     [constrained, selectedCameraId],
   );
@@ -178,10 +208,10 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
           import('@tensorflow-models/face-landmarks-detection'),
         ]);
 
-        try {
-          await tf.setBackend('webgl');
-        } catch {
-          // No WebGL available (older/limited devices): keep the default backend.
+        // `setBackend` resolves false when the backend cannot be set; it does
+        // not throw. In that case TF.js keeps the backend it already selected.
+        if (!(await tf.setBackend('webgl'))) {
+          console.info('WebGL backend unavailable; using the default TensorFlow.js backend.');
         }
         await tf.ready();
 
@@ -190,7 +220,14 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
           { runtime: 'tfjs', refineLandmarks: true }
         );
 
-        if (cancelled) return;
+        if (cancelled) {
+          // The component (or this effect, under StrictMode) went away while the
+          // weights were loading: release them instead of orphaning the model.
+          loadedModel.dispose();
+          return;
+        }
+
+        modelRef.current = loadedModel;
         setModel(loadedModel);
         setStatus(TrackingStatus.Idle);
       } catch (error) {
@@ -207,37 +244,53 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     return () => {
       cancelled = true;
       isDetectingRef.current = false;
+      loopIdRef.current += 1;
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+
+      modelRef.current?.dispose();
+      modelRef.current = null;
     };
   }, [addError, refreshCameras]);
 
+  // Hot-plugged cameras should appear in the picker without a page reload.
+  useEffect(() => {
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return;
+
+    const handleDeviceChange = () => {
+      refreshCameras().catch(error => addError('Could not refresh camera list', error));
+    };
+
+    mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    return () => mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+  }, [refreshCameras, addError]);
+
   const drawLandmarks = useCallback((
     ctx: CanvasRenderingContext2D,
-    landmarks: any[],
+    landmarks: Keypoint[],
   ) => {
     if (!landmarks?.length) return;
 
     ctx.fillStyle = 'rgba(16, 185, 129, 0.95)';
     landmarks.forEach((landmark, index) => {
-      if (index % 4 !== 0 && ![1, 8, 33, 263, 13].includes(index)) return;
+      if (index % 4 !== 0 && !HIGHLIGHTED_LANDMARKS.has(index)) return;
       const point = getLandmarkPoint(landmark);
       ctx.beginPath();
-      ctx.arc(point.x, point.y, [1, 8, 33, 263, 13].includes(index) ? 3 : 1.5, 0, 2 * Math.PI);
+      ctx.arc(point.x, point.y, HIGHLIGHTED_LANDMARKS.has(index) ? 3 : 1.5, 0, 2 * Math.PI);
       ctx.fill();
     });
   }, []);
 
-  const processFaceData = useCallback((face: any): FaceData | null => {
+  const processFaceData = useCallback((face: Face): FaceData | null => {
     try {
       const landmarks = face.keypoints;
       if (!landmarks || landmarks.length < 387) return null;
 
-      const nose = getLandmarkPoint(landmarks[1]);
-      const chin = getLandmarkPoint(landmarks[152] ?? landmarks[8]);
-      const leftEye = getLandmarkPoint(landmarks[159]);
-      const rightEye = getLandmarkPoint(landmarks[386]);
-      const mouth = getLandmarkPoint(landmarks[13]);
-      const confidence = typeof face.score === 'number' ? face.score : 0.95;
+      const nose = getLandmarkPoint(landmarks[LANDMARK.noseTip]);
+      const chin = getLandmarkPoint(landmarks[LANDMARK.chin] ?? landmarks[8]);
+      const leftEye = getLandmarkPoint(landmarks[LANDMARK.leftEyeCorner]);
+      const rightEye = getLandmarkPoint(landmarks[LANDMARK.rightEyeCorner]);
+      const mouth = getLandmarkPoint(landmarks[LANDMARK.mouth]);
 
       return {
         timestamp: Date.now(),
@@ -256,7 +309,6 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
         mouth_x: mouth.x,
         mouth_y: mouth.y,
         mouth_z: mouth.z,
-        confidence,
       };
     } catch (error) {
       addError('Error processing face data', error);
@@ -264,14 +316,25 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     }
   }, [addError]);
 
+  const queueFrame = useCallback(() => {
+    animationFrameRef.current = requestAnimationFrame(() => {
+      detectRef.current();
+    });
+  }, []);
+
   const detect = useCallback(async () => {
-    if (!isDetectingRef.current || !webcamRef.current || !canvasRef.current || !model) return;
-
-    const video = webcamRef.current.video;
+    const detector = modelRef.current;
+    const video = webcamRef.current?.video;
     const canvas = canvasRef.current;
+    if (!isDetectingRef.current || !detector || !video || !canvas) return;
 
-    if (!video || video.readyState < HTMLMediaElement.HAVE_ENOUGH_DATA || !video.videoWidth) {
-      animationFrameRef.current = requestAnimationFrame(detect);
+    // Captured before any await: if Stop (or a new Start) happens while the
+    // detector is working, this iteration must not re-queue itself.
+    const loopId = loopIdRef.current;
+    const ownsLoop = () => isDetectingRef.current && loopId === loopIdRef.current;
+
+    if (video.readyState < HTMLMediaElement.HAVE_ENOUGH_DATA || !video.videoWidth) {
+      if (ownsLoop()) queueFrame();
       return;
     }
 
@@ -279,7 +342,7 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     // frame — the detector can rarely keep up, and the extra ticks only burn CPU.
     const frameStart = performance.now();
     if (frameStart - lastFrameAtRef.current < 1000 / targetFps) {
-      animationFrameRef.current = requestAnimationFrame(detect);
+      if (ownsLoop()) queueFrame();
       return;
     }
     lastFrameAtRef.current = frameStart;
@@ -298,58 +361,81 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // Detect faces
-      const faces = await model.estimateFaces(video);
+      const faces = await detector.estimateFaces(video);
+      const face = faces[0];
 
-      if (faces.length > 0) {
-        const face = faces[0];
+      let faceData: FaceData | null = null;
+      let pose: HeadPose | null = null;
+
+      if (face) {
         const keypoints = face.keypoints;
 
-        if (showLandmarks) {
+        if (showLandmarksRef.current) {
           drawLandmarks(ctx, keypoints);
         }
 
-        const faceData = processFaceData(face);
-        if (faceData) {
-          addData(faceData);
+        faceData = processFaceData(face);
+        if (faceData) addData(faceData);
 
-          // The header only shows the latest confidence: emitting it on every
-          // frame re-rendered the whole page at the detection rate.
-          const now = performance.now();
-          if (now - lastEmitRef.current >= DATA_EMIT_INTERVAL_MS) {
-            lastEmitRef.current = now;
-            onDataUpdate?.(faceData);
-          }
+        if (showHeadPoseRef.current) {
+          const absolute = estimateHeadPoseFromPoints(readPosePoints(keypoints));
+          // The heuristic is not calibrated: a neutral head does not read zero.
+          // Subtracting the first frame of the session turns it into a relative
+          // indicator, which is what the overlay reports.
+          baselinePoseRef.current ??= absolute;
+          pose = offsetHeadPose(absolute, baselinePoseRef.current);
 
-          if (showHeadPose) {
-            const headPose = estimateHeadPoseFromPoints({
-              nose: getLandmarkPoint(keypoints[1]),
-              chin: getLandmarkPoint(keypoints[152] ?? keypoints[8]),
-              leftEye: getLandmarkPoint(keypoints[159]),
-              rightEye: getLandmarkPoint(keypoints[386]),
-            });
-
-            drawOverlay(ctx, canvas.width, [
-              `Yaw ${headPose.yaw.toFixed(1)}°`,
-              `Pitch ${headPose.pitch.toFixed(1)}°`,
-              `Roll ${headPose.roll.toFixed(1)}°`,
-            ]);
-          }
+          drawOverlay(ctx, canvas.width, [
+            'Head pose (vs start)',
+            `Yaw ${pose.yaw.toFixed(1)}°`,
+            `Pitch ${pose.pitch.toFixed(1)}°`,
+            `Roll ${pose.roll.toFixed(1)}°`,
+          ]);
         }
       } else {
         drawOverlay(ctx, canvas.width, ['No face detected'], 180);
+      }
+
+      // One throttled UI update per interval: the header readout and the
+      // screen-reader status do not need to re-render at the detection rate.
+      const now = performance.now();
+      if (now - lastEmitRef.current >= DATA_EMIT_INTERVAL_MS) {
+        lastEmitRef.current = now;
+        if (faceData) onDataUpdate?.(faceData);
+
+        if (pose) {
+          setAssistiveText(
+            `Face detected. Apparent head orientation relative to the start of the session: yaw ${Math.round(pose.yaw)}, pitch ${Math.round(pose.pitch)}, roll ${Math.round(pose.roll)} degrees.`,
+          );
+        } else {
+          setAssistiveText(faceData ? 'Face detected.' : 'No face detected.');
+        }
       }
     } catch (error) {
       addError('Detection error', error);
     } finally {
       recordFrame(performance.now() - frameStart);
-      if (isDetectingRef.current) {
-        animationFrameRef.current = requestAnimationFrame(detect);
-      }
+      if (ownsLoop()) queueFrame();
     }
-  }, [model, targetFps, showLandmarks, showHeadPose, drawLandmarks, processFaceData, addData, onDataUpdate, addError, recordFrame]);
+  }, [
+    targetFps,
+    drawLandmarks,
+    processFaceData,
+    addData,
+    onDataUpdate,
+    addError,
+    recordFrame,
+    queueFrame,
+  ]);
+
+  useEffect(() => {
+    detectRef.current = () => {
+      void detect();
+    };
+  }, [detect]);
 
   const startTracking = useCallback(() => {
-    if (!model) {
+    if (!modelRef.current) {
       addError('Model not initialized yet');
       return;
     }
@@ -358,16 +444,19 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     resetMetrics();
     lastFrameAtRef.current = 0;
     lastEmitRef.current = 0;
-    setStartTime(Date.now());
-    setStatus(TrackingStatus.Tracking);
+    baselinePoseRef.current = null;
+    loopIdRef.current += 1;
     isDetectingRef.current = true;
-    animationFrameRef.current = requestAnimationFrame(detect);
-  }, [model, detect, clearHistory, resetMetrics, addError]);
+    setStatus(TrackingStatus.Tracking);
+    queueFrame();
+  }, [clearHistory, resetMetrics, addError, queueFrame]);
 
   const stopTracking = useCallback(() => {
     isDetectingRef.current = false;
-    setStatus(TrackingStatus.Paused);
+    loopIdRef.current += 1;
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    setStatus(TrackingStatus.Paused);
+    setAssistiveText('Tracking stopped.');
   }, []);
 
   const downloadData = useCallback(() => {
@@ -375,14 +464,10 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
       const stats = getStats();
       const data = {
         session: {
-          startTime,
-          endTime: Date.now(),
-          duration: stats.sessionDuration,
-          totalFrames: stats.totalFrames,
-          averageFps: stats.averageFps,
-          depthCameraPreferred: usingDepthCamera,
+          ...stats,
+          generatedAt: new Date().toISOString(),
         },
-        landmarks: history,
+        landmarks: getSessionData(),
       };
 
       const jsonString = JSON.stringify(data, null, 2);
@@ -396,9 +481,9 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
     } catch (error) {
       addError('Failed to download data', error);
     }
-  }, [history, startTime, getStats, usingDepthCamera, addError]);
+  }, [getStats, getSessionData, addError]);
 
-  const sessionDuration = startTime ? Date.now() - startTime : 0;
+  const isTracking = status === TrackingStatus.Tracking;
   const isReady = status !== TrackingStatus.Initializing && Boolean(model);
   const latest = history[0] ?? null;
 
@@ -406,6 +491,10 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
 
   return (
     <section className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-4 px-3 sm:gap-6 sm:px-4 md:grid-cols-[minmax(0,1fr)_320px]">
+      <p className="sr-only" role="status" aria-live="polite">
+        {assistiveText}
+      </p>
+
       <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:rounded-3xl">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 p-4 sm:p-5">
           <div className="min-w-0">
@@ -416,21 +505,27 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
               Face tracking preview
             </h2>
             <p className="mt-1 text-xs text-slate-500 sm:text-sm">
-              {usingDepthCamera ? 'Depth-capable camera preferred' : 'Standard webcam mode'} · {cameras.length || 1} camera{cameras.length === 1 ? '' : 's'} found
+              {cameras.length === 0
+                ? 'No camera detected'
+                : `${cameras.length} camera${cameras.length === 1 ? '' : 's'} found`}{' '}
+              · {constrained ? `${COMPACT_TARGET_FPS} fps target` : `${DESKTOP_TARGET_FPS} fps target`}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 sm:py-2 sm:text-sm">
-            <span className={`h-2.5 w-2.5 rounded-full ${status === TrackingStatus.Tracking ? 'bg-emerald-500' : status === TrackingStatus.Error ? 'bg-rose-500' : 'bg-amber-400'}`} />
+            <span className={`h-2.5 w-2.5 rounded-full ${isTracking ? 'bg-emerald-500' : status === TrackingStatus.Error ? 'bg-rose-500' : 'bg-amber-400'}`} />
             {status === TrackingStatus.Initializing ? 'Loading model' : status}
           </div>
         </div>
 
-        <div className="relative aspect-video bg-slate-950">
+        <div
+          className="relative aspect-video bg-slate-950"
+          role="img"
+          aria-label="Live camera preview with facial landmarks and head orientation drawn on top"
+        >
           <Webcam
             ref={webcamRef}
             audio={false}
             mirrored={false}
-            screenshotFormat="image/jpeg"
             videoConstraints={videoConstraints}
             onUserMedia={() => refreshCameras().catch(error => addError('Could not refresh camera list', error))}
             onUserMediaError={(error) => {
@@ -439,7 +534,7 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
             }}
             className="h-full w-full object-cover"
           />
-          <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
+          <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
           {!isReady && (
             <div className="absolute inset-0 grid place-items-center bg-slate-950/80 px-6 text-center text-white">
               <div>
@@ -453,27 +548,32 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
         <div className="grid grid-cols-2 gap-2 p-4 sm:flex sm:flex-wrap sm:items-center sm:gap-3 sm:p-5">
           <button
             onClick={startTracking}
-            disabled={!isReady || status === TrackingStatus.Tracking}
+            disabled={!isReady || isTracking}
             className={`${actionButtonClass} bg-slate-950 text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300`}
           >
             Start tracking
           </button>
           <button
             onClick={stopTracking}
-            disabled={status !== TrackingStatus.Tracking}
+            disabled={!isTracking}
             className={`${actionButtonClass} border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300`}
           >
             Stop
           </button>
           <button
             onClick={downloadData}
-            disabled={history.length === 0}
+            disabled={metrics.totalFrames === 0}
             className={`${actionButtonClass} border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300`}
           >
             Export JSON
           </button>
           <button
-            onClick={clearHistory}
+            onClick={() => {
+              // Clearing the session also resets its counters, so the export
+              // button and the metric cards start from zero again.
+              clearHistory();
+              resetMetrics();
+            }}
             className={`${actionButtonClass} text-slate-500 hover:bg-slate-50`}
           >
             Clear
@@ -483,30 +583,41 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
 
       <aside className="min-w-0 space-y-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-5">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 sm:text-sm">Camera</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 sm:text-sm">
+            <label htmlFor="camera-select">Camera</label>
+          </h3>
           <select
+            id="camera-select"
             value={selectedCameraId}
             onChange={(event) => setSelectedCameraId(event.target.value)}
+            aria-describedby="camera-note"
             className="mt-3 w-full min-h-[44px] rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-700 outline-none transition focus:border-teal-500 focus:ring-4 focus:ring-teal-500/10 sm:mt-4 sm:min-h-0 sm:text-sm"
           >
             {cameras.length === 0 && <option value="">Default camera</option>}
             {cameras.map((camera, index) => (
               <option key={camera.deviceId || index} value={camera.deviceId}>
-                {camera.label || `Camera ${index + 1}`}{camera.isDepthCamera ? ' · depth preferred' : ''}
+                {camera.label || `Camera ${index + 1}`}
               </option>
             ))}
           </select>
-          <p className="mt-3 text-xs leading-5 text-slate-500">
-            Depth cameras are selected by default when the browser exposes a camera label such as RealSense, Kinect, LiDAR, ToF, or TrueDepth. Browsers still provide a normal video stream, so tracking falls back automatically when depth data is unavailable.
+          <p id="camera-note" className="mt-3 text-xs leading-5 text-slate-500">
+            The camera list fills in once the browser grants permission, and updates when a camera is
+            plugged in or removed. If the selected camera disappears, the browser falls back to the
+            default device.
           </p>
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:gap-3">
-          <Metric label="FPS" value={metrics.fps.toString()} />
-          <Metric label="Latency" value={`${metrics.avgLatency.toFixed(0)}ms`} />
-          <Metric label="Frames" value={history.length.toString()} />
-          <Metric label="Duration" value={formatTime(sessionDuration)} />
+          <Metric label="FPS" value={(isTracking ? metrics.fps : 0).toString()} />
+          <Metric label="Processing" value={`${metrics.processingMs.toFixed(0)}ms`} />
+          <Metric label="Frames" value={metrics.totalFrames.toString()} />
+          <Metric label="Duration" value={formatTime(metrics.elapsedMs)} />
         </div>
+        <p className="-mt-1 px-1 text-xs leading-5 text-slate-500">
+          FPS counts completed frames in the last second. Processing is inference plus drawing per
+          frame; camera capture time is not included. Frames and duration cover the whole session,
+          while the chart below shows only the most recent 40 frames.
+        </p>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-5">
           <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 sm:text-sm">Options</h3>
@@ -526,8 +637,8 @@ export function FaceTracker({ onDataUpdate, maxHistorySize = 200 }: FaceTrackerP
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-5">
             <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 sm:text-sm">Latest read</h3>
             <dl className="mt-3 space-y-2 text-sm text-slate-600 sm:mt-4">
-              <div className="flex items-center justify-between gap-3"><dt>Nose</dt><dd className="truncate font-medium text-slate-900">{Math.round(latest.nose_x)}, {Math.round(latest.nose_y)}, {latest.nose_z.toFixed(2)}</dd></div>
-              <div className="flex items-center justify-between gap-3"><dt>Confidence</dt><dd className="truncate font-medium text-slate-900">{(latest.confidence * 100).toFixed(1)}%</dd></div>
+              <div className="flex items-center justify-between gap-3"><dt>Nose</dt><dd className="truncate font-medium text-slate-900">{Math.round(latest.nose_x)}, {Math.round(latest.nose_y)}</dd></div>
+              <div className="flex items-center justify-between gap-3"><dt>Nose depth</dt><dd className="truncate font-medium text-slate-900">{latest.nose_z.toFixed(2)}</dd></div>
               <div className="flex items-center justify-between gap-3"><dt>Updated</dt><dd className="truncate font-medium text-slate-900">{new Date(latest.timestamp).toLocaleTimeString()}</dd></div>
             </dl>
           </div>

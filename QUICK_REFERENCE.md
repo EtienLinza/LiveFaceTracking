@@ -1,121 +1,71 @@
-# Live Face Tracking System - Quick Reference
+# Live Face Tracking System — Quick Reference
 
-## 🚀 Starting the Application
+## Start the web app
 
-### Frontend Application
 ```bash
+npm install
 npm run dev
 ```
 
-Then open: http://localhost:5173
+Then open http://localhost:5173 and allow camera access.
 
-**Optional: Python Script** (for standalone tracking)
+Optional desktop script (separate tool, not part of the web app):
+
 ```bash
+pip install -r requirements.txt
 python live_face_tracking.py
 ```
 
----
-
-## ⚡ Quick Commands
+## Commands
 
 ```bash
-# Install dependencies
-npm install
-
-# Run application
-npm run dev
-
-# Build for production
-npm run build
-
-# Type checking
-npm run type-check
-
-# Lint code
-npm run lint
-
-# Format code
-npm run format
+npm run dev          # Dev server with hot reload
+npm run build        # Type-check + production build into dist/
+npm run type-check   # TypeScript only
+npm run lint         # ESLint
+npm test             # Unit tests (Vitest)
+npm run format       # Prettier
 ```
 
----
+## What it does
 
-## 📊 Application URLs
+- Detect 468 face landmarks from the webcam in the browser (TensorFlow.js +
+  MediaPipe FaceMesh).
+- Draw landmarks and a head orientation overlay on the video.
+- Report FPS, per-frame processing time, frame count and session duration.
+- Export the full session's landmark readings as JSON.
 
-- **Frontend**: http://localhost:5173
+Head orientation is an **approximate indicator** relative to the first frame of
+the session, not a measured 3D pose. The detector does not report a confidence
+score, so none is shown.
 
----
+## Privacy
 
-## 🎯 Features
+Video stays in the browser. The only network requests are the model weights from
+`tfhub.dev` and `storage.googleapis.com`. The JSON export is generated locally.
 
-✅ Real-time face tracking
-✅ 3D head pose estimation
-✅ Performance monitoring (FPS, latency)
-✅ Data export (JSON)
-✅ Error handling
-✅ Browser-based (no server)
-✅ Database persistence
+## Troubleshooting
 
----
+**No camera / permission error**
+- Allow camera access for the page, close other apps using the camera, and try
+  another browser. The camera list only fills in after permission is granted.
 
-## 🐛 Troubleshooting
+**Low FPS**
+- The processing figure covers inference plus drawing. Close other GPU-heavy
+  tabs; on phones the app already captures 640×480 at a 20 fps target.
 
-**Webcam not working?**
-- Check browser permissions
-- Ensure no other app uses the camera
-- Try a different browser
+**Model never finishes loading**
+- The weights are fetched from `tfhub.dev` on first use; check that the network
+  allows it.
 
-**Low FPS?**
-- Close background apps
-- Try CPU mode if GPU unavailable
-- Reduce screen resolution
+## Documentation
 
-**Database connection error?**
-- Verify .env credentials
-- Check internet connection
-- Confirm Supabase project is active
+- `README.md` — what the app does, metric definitions, export format, limits
+- `SETUP_GUIDE_SIMPLE.md` — step-by-step setup help
+- `AGENTS.md` — notes for working on this repo
+- `src/` — source code with comments
 
----
+## Deploying
 
-## 📚 Documentation
-
-- **SETUP_GUIDE.md** - Complete installation guide
-- **README_NEW.md** - Full documentation
-- **IMPROVEMENTS_SUMMARY.md** - All improvements made
-- **src/** - Source code with comments
-
----
-
-## 🚢 Deployment
-
-### Build
-```bash
-npm run build
-```
-
-### Deploy to Vercel
-```bash
-npm install -g vercel
-vercel deploy
-```
-
-### Docker
-```bash
-docker build -t face-tracking .
-docker run -p 5173:5173 face-tracking
-```
-
----
-
-## 💡 Tips
-
-- Use CUDA for 10-50x faster processing (if GPU available)
-- Record sessions for analysis
-- Export data for external processing
-- Check API documentation at /docs
-- Monitor performance metrics in dashboard
-
----
-
-**Version**: 2.0.0  
-**Need help?** Check SETUP_GUIDE.md or README_NEW.md
+`npm run build` writes static files to `dist/`. Serve that directory from any
+static host. Do not expose the Vite dev server publicly.

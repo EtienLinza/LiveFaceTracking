@@ -51,6 +51,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      // Error text and component stacks are only useful to the developer; in a
+      // production build they would hand internals to whoever sees the crash.
+      const showDetails = import.meta.env?.DEV === true;
+
       return (
         <div className="min-h-screen bg-red-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full">
@@ -61,7 +65,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
               An unexpected error occurred in the face tracking application.
             </p>
             
-            {this.state.error && (
+            {showDetails && this.state.error && (
               <details className="mb-4 bg-gray-50 p-3 rounded text-sm">
                 <summary className="cursor-pointer font-semibold text-gray-700">
                   Error details
@@ -72,7 +76,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
               </details>
             )}
 
-            {this.state.errorInfo && (
+            {showDetails && this.state.errorInfo && (
               <details className="mb-4 bg-gray-50 p-3 rounded text-sm">
                 <summary className="cursor-pointer font-semibold text-gray-700">
                   Stack trace

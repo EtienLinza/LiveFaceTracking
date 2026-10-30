@@ -1,8 +1,8 @@
 {
   "name": "face-tracking-app",
   "private": true,
-  "version": "2.0.0",
-  "description": "Live Face Tracking System with 3D head pose estimation",
+  "version": "2.1.0",
+  "description": "Browser-based facial landmark tracking with an approximate head orientation indicator",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,9 +10,10 @@
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
     "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "format": "prettier --write 'src/**/*.{ts,tsx,css,json}'",
-    "python:track": "python live_face_tracking.py",
-    "clean": "rm -rf dist node_modules"
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.16.0",
@@ -24,33 +25,36 @@
     "react-webcam": "^7.2.0"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.10.0",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
-    "@typescript-eslint/eslint-plugin": "^6.14.0",
-    "@typescript-eslint/parser": "^6.14.0",
-    "@vitejs/plugin-react": "^4.2.1",
+    "@typescript-eslint/eslint-plugin": "^8.72.1",
+    "@typescript-eslint/parser": "^8.72.1",
+    "@vitejs/plugin-react": "^6.1.2",
     "autoprefixer": "^10.4.17",
-    "eslint": "^8.55.0",
+    "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "jsdom": "^30.1.3",
     "postcss": "^8.4.33",
     "prettier": "^3.1.0",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
-    "vite": "^5.0.8"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   },
   "keywords": [
     "face-tracking",
     "facial-landmarks",
-    "head-pose-estimation",
-    "3d-tracking",
+    "head-pose",
     "real-time-detection"
   ],
-  "author": "Your Name",
+  "author": "EtienLinza",
   "license": "MIT",
   "engines": {
-    "node": ">=16.0.0",
-    "npm": ">=8.0.0"
+    "node": ">=22.12.0",
+    "npm": ">=10.0.0"
   }
 }

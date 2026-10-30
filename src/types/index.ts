@@ -1,4 +1,10 @@
 // Common types and interfaces used throughout the application
+
+/**
+ * One detected frame. Only values the detector actually produces are stored:
+ * MediaPipe FaceMesh's tfjs runtime does not report a confidence score, so
+ * there is no such field here.
+ */
 export interface FaceData {
   timestamp: number;
   nose_x: number;
@@ -16,30 +22,26 @@ export interface FaceData {
   mouth_x: number;
   mouth_y: number;
   mouth_z: number;
-  confidence: number;
 }
 
-export interface TrackingStats {
+/** Whole-session summary, independent of the displayed history window. */
+export interface SessionStats {
   totalFrames: number;
   averageFps: number;
-  averageLatency: number;
-  facesDetected: number;
   sessionDuration: number;
+  startTime: number | null;
+  endTime: number | null;
 }
 
+/**
+ * Apparent head orientation in the image plane. Produced by a 2D landmark-ratio
+ * heuristic, not by a solved 3D pose, so the values are an indicator rather than
+ * measured angles.
+ */
 export interface HeadPose {
   yaw: number;
   pitch: number;
   roll: number;
-}
-
-export interface FaceMetrics {
-  facePresent: boolean;
-  headPose: HeadPose;
-  blinkDetected: boolean;
-  eyeGazeX: number;
-  eyeGazeY: number;
-  mouthOpen: number;
 }
 
 export enum TrackingStatus {
