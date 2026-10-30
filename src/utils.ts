@@ -7,27 +7,57 @@ export function formatTime(milliseconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
+export interface HeadPosePoint {
+  x: number;
+  y: number;
+}
+
+export interface HeadPosePoints {
+  nose: HeadPosePoint;
+  chin: HeadPosePoint;
+  leftEye: HeadPosePoint;
+  rightEye: HeadPosePoint;
+}
+
+const toPoint = (point?: number[]): HeadPosePoint => ({
+  x: point?.[0] ?? 0,
+  y: point?.[1] ?? 0,
+});
+
 export function estimateHeadPose(landmarks: number[][]): HeadPose {
   if (landmarks.length < 68) {
     return { yaw: 0, pitch: 0, roll: 0 };
   }
 
-  const nose = landmarks[30] ?? landmarks[1];
-  const chin = landmarks[8];
-  const leftEye = landmarks[36];
-  const rightEye = landmarks[45];
+  return estimateHeadPoseFromPoints({
+    nose: toPoint(landmarks[30] ?? landmarks[1]),
+    chin: toPoint(landmarks[8]),
+    leftEye: toPoint(landmarks[36]),
+    rightEye: toPoint(landmarks[45]),
+  });
+}
 
-  const eyeDx = rightEye[0] - leftEye[0];
-  const eyeDy = rightEye[1] - leftEye[1];
+/**
+ * Same estimation as `estimateHeadPose`, but takes only the four landmarks it
+ * actually needs so a per-frame caller does not have to copy all 468 points.
+ */
+export function estimateHeadPoseFromPoints({
+  nose,
+  chin,
+  leftEye,
+  rightEye,
+}: HeadPosePoints): HeadPose {
+  const eyeDx = rightEye.x - leftEye.x;
+  const eyeDy = rightEye.y - leftEye.y;
   const roll = Math.atan2(eyeDy, eyeDx) * (180 / Math.PI);
 
-  const faceCenterX = (leftEye[0] + rightEye[0]) / 2;
+  const faceCenterX = (leftEye.x + rightEye.x) / 2;
   const eyeDistance = Math.max(Math.hypot(eyeDx, eyeDy), 1);
-  const yaw = ((nose[0] - faceCenterX) / eyeDistance) * 45;
+  const yaw = ((nose.x - faceCenterX) / eyeDistance) * 45;
 
-  const eyeCenterY = (leftEye[1] + rightEye[1]) / 2;
-  const faceHeight = Math.max(Math.abs(chin[1] - eyeCenterY), 1);
-  const pitch = ((nose[1] - eyeCenterY) / faceHeight) * 30;
+  const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+  const faceHeight = Math.max(Math.abs(chin.y - eyeCenterY), 1);
+  const pitch = ((nose.y - eyeCenterY) / faceHeight) * 30;
 
   return { yaw, pitch, roll };
 }

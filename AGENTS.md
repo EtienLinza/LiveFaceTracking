@@ -78,6 +78,25 @@ expect to find a source-level build error behind that failure.
   overlay can only be checked in a real browser with a webcam.
 - Running `npm run build` writes `dist/` into the bind-mounted repo; it is gitignored.
 
+## Performance & responsive behaviour (keep when editing)
+
+- `@tensorflow/tfjs` and `@tensorflow-models/face-landmarks-detection` are imported
+  dynamically inside the model-init effect, and `chart.js` lives in
+  `src/components/NoseChart.tsx` behind `React.lazy`. The app shell is ~55 kB gzip;
+  do not convert these back to static imports (that put ~2 MB in the initial bundle).
+- `useFaceDataHistory` collects rows in a ref and only publishes React state every
+  200 ms, and `onDataUpdate` is throttled the same way. Rendering at the detection
+  rate is what made phones stutter.
+- The detection loop is throttled to `desktop 30 / compact 20` fps, captures 720p on
+  large screens and 640x480 on coarse-pointer/small screens, and no longer copies the
+  video frame onto the canvas (`<video>` and `<canvas>` share the same `object-cover`
+  crop; only landmarks/overlay are drawn). Canvas 2D context is cached in a ref.
+- `estimateHeadPoseFromPoints` exists so a frame does not build 468 coordinate arrays;
+  `estimateHeadPose` still works on landmark arrays for other callers.
+- Layout: single column below `md`, two columns from `md`; grid/flex children need
+  `min-w-0` or the video forces sideways scrolling. Touch targets are at least 44 px
+  and form controls use `text-base` on mobile so iOS does not zoom on focus.
+
 ## How to verify it works
 
 1. `curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/` → `200`, and the

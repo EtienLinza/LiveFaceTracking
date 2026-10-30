@@ -9,24 +9,24 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
-        <header className="bg-gray-800 border-b border-gray-700 py-6 shadow-lg">
-          <div className="max-w-6xl mx-auto px-4">
-            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2">
+      <div className="flex min-h-[100dvh] flex-col bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+        <header className="bg-gray-800 border-b border-gray-700 px-3 py-4 shadow-lg sm:px-4 sm:py-6">
+          <div className="mx-auto max-w-6xl">
+            <h1 className="text-xl font-bold leading-tight text-white sm:text-2xl md:text-3xl">
               🎯 Live Face Tracking System
             </h1>
-            <p className="text-sm sm:text-base text-gray-400">
+            <p className="mt-1 text-xs text-gray-400 sm:text-sm md:text-base">
               Real-time facial landmark detection with 3D head pose estimation
             </p>
             {lastUpdate && (
-              <p className="text-sm text-green-400 mt-2">
+              <p className="mt-1.5 text-xs text-green-400 sm:text-sm">
                 Latest confidence: {(lastUpdate.confidence * 100).toFixed(1)}%
               </p>
             )}
           </div>
         </header>
 
-        <main className="py-8">
+        <main className="flex-1 py-4 sm:py-8">
           <FaceTracker onDataUpdate={setLastUpdate} maxHistorySize={200} />
         </main>
       </div>

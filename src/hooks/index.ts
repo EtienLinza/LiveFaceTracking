@@ -53,16 +53,34 @@ export const useFrameMetrics = () => {
 };
 
 /**
- * Hook for managing face tracking data history
+ * Hook for managing face tracking data history.
+ *
+ * Rows are collected in a ref on every detected frame, but React state is only
+ * published every `syncIntervalMs`. Re-rendering the tree at the detection rate
+ * is what made the UI stutter on phones; the panel only needs a few updates a
+ * second to look live.
  */
-export const useFaceDataHistory = (maxSize: number = 100) => {
+export const useFaceDataHistory = (maxSize: number = 100, syncIntervalMs = 200) => {
   const [history, setHistory] = useState<FaceData[]>([]);
   const historyRef = useRef<FaceData[]>([]);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelPendingSync = useCallback(() => {
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+  }, []);
 
   const addData = useCallback((data: FaceData) => {
     historyRef.current = [data, ...historyRef.current].slice(0, maxSize);
-    setHistory([...historyRef.current]);
-  }, [maxSize]);
+
+    if (syncTimerRef.current) return;
+    syncTimerRef.current = setTimeout(() => {
+      syncTimerRef.current = null;
+      setHistory(historyRef.current);
+    }, syncIntervalMs);
+  }, [maxSize, syncIntervalMs]);
 
   const getLatest = useCallback(() => historyRef.current[0], []);
 
@@ -84,9 +102,12 @@ export const useFaceDataHistory = (maxSize: number = 100) => {
   }, []);
 
   const clear = useCallback(() => {
+    cancelPendingSync();
     historyRef.current = [];
     setHistory([]);
-  }, []);
+  }, [cancelPendingSync]);
+
+  useEffect(() => cancelPendingSync, [cancelPendingSync]);
 
   return { history, addData, getLatest, getStats, clear };
 };
